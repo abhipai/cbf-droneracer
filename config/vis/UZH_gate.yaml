@@ -15,7 +15,7 @@ ani_kwargs:
   fps: 30
   dpi: 200
   traj_history: 0.0
-  follow_drone: True
+  follow_drone: False
   hide_background: False
   hide_ground: False
   # flash_gate: False

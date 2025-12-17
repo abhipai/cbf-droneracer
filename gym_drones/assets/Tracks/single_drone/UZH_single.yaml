@@ -2,7 +2,7 @@ comment : "UZH_single"
 vis_config: UZH_gate
 num_drones : 1
 same_track : True
-repeat_lap : 3
+repeat_lap : 1
 start_points : 
 - [-0.75, -0.75, 4.5]
 end_points : 

@@ -5,7 +5,6 @@ from gym_drones.utils.enums import ObservationType, SimulationDim, ActionType, D
 from gym_drones.utils.rl_manager.config import process_config, process_vis_config
 from gym_drones.utils.rl_manager.runner import pre_runner, build_env, load_model
 from gym_drones.utils.rl_manager.eval_utils import eval_model
-from gym_drones.utils.vis_utils import create_raceplotter, load_plotter_track
 
 #### Set Constants #######################################
 current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,6 +85,16 @@ def run():
 
     # Use the arguments
     args = parser.parse_args()
+
+    # Backend selection:
+    # - default (interactive, e.g. TkAgg) when not saving video: show pop-up plots as usual
+    # - non-interactive (Agg) when saving video: avoid Tkinter canvas errors during animation saving
+    import matplotlib
+    if args.save_video:
+        matplotlib.use("Agg")
+
+    # Import visualization utilities after backend selection so RacePlotter uses the right backend
+    from gym_drones.utils.vis_utils import create_raceplotter, load_plotter_track
     if args.load_model is None and args.load_ckpt is None:
         raise ValueError("Please specify the model path using --load_model or --load_ckpt.")
     if args.load_model is not None and args.load_ckpt is not None:

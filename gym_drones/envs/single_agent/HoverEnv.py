@@ -115,7 +115,100 @@ class HoverEnv(SingleDroneAgentBase):
                 -2e-4 * np.linalg.norm(rate)
                 - 1e-4 * np.linalg.norm(self.clipped_action[0, :] - self.last_clipped_action[0, :]) ** 2
             )
-            total_reward = prog_reward + command_reward
+            
+            # Velocity Alignment Control Barrier Function (CBF)
+            # Line-of-Sight Guidance penalty
+            align_cbf_reward = 0.0
+            velocity = state[10:13]  # Un-normalized world-frame velocity [vx, vy, vz]
+            position = state[0:3]    # Un-normalized world-frame position [x, y, z]
+            speed = np.linalg.norm(velocity)
+            to_target = target - position
+            dist = np.linalg.norm(to_target)
+            
+            # Normalize vectors (used for both CBF and waypoint passage reward)
+            velocity_normalized = velocity / speed if speed > 0.1 else np.zeros(3)
+            to_target_normalized = to_target / dist if dist > 0.1 else np.zeros(3)
+            
+            # Compute FPV camera forward vector: body x-axis rotated 30 degrees upward (pitch up)
+            # In body frame: FPV forward = [cos(30°), 0, sin(30°)] = [√3/2, 0, 0.5]
+            FPV_CAMERA_ANGLE = np.radians(30.0)  # 30 degrees upward tilt
+            fpv_forward_body = np.array([np.cos(FPV_CAMERA_ANGLE), 0.0, np.sin(FPV_CAMERA_ANGLE)])
+            # Transform to world frame using rotation matrix
+            fpv_forward_world = self.rot[0, :, :] @ fpv_forward_body
+            
+            # Reduce CBF penalty when close to waypoint to encourage passing through
+            # Scale penalty by distance: full penalty when far, reduced when close
+            cbf_scale = min(1.0, dist / (self.WAYPOINT_R * 2.0)) if hasattr(self, 'WAYPOINT_R') else 1.0
+            
+            # Velocity Alignment Control Barrier Function (CBF) using FPV camera direction
+            # Align FPV camera forward vector with velocity direction
+            align_cbf_reward = 0.0
+            if speed > 0.1 and dist > 0.1:
+                # Calculate cosine similarity between FPV camera forward and velocity direction
+                cos_theta = np.dot(fpv_forward_world, velocity_normalized)
+                
+                # Define barrier: h = cos_theta - 0.6 (creates ~53-degree safety cone)
+                h = cos_theta - 0.6
+                
+                # Apply penalty if misaligned (h < 0) or reward if well-aligned (h > 0)
+                # Reduced penalty weight to balance with other rewards and improve stability
+                # Scale penalty down when close to waypoint to encourage passing through
+                if h < 0:
+                    align_cbf_reward = -0.05 * abs(h) * cbf_scale  # Reduced penalty for stability
+                else:
+                    align_cbf_reward = 0.03 * h  # Small reward for good alignment
+            
+            # Yaw Alignment Reward: Encourage FPV camera horizontal direction to align with velocity
+            # Uses horizontal projection of FPV camera forward vector (30° upward tilt)
+            yaw_reward = 0.0
+            if speed > 0.1 and dist > 0.1:  # Only apply when moving and not too close
+                current_yaw = state[9]  # Yaw angle from state vector [rpy: 7=roll, 8=pitch, 9=yaw]
+                # Use horizontal projection of FPV camera forward vector for desired yaw
+                fpv_forward_xy = fpv_forward_world[0:2]  # XY components of FPV camera forward
+                velocity_xy = velocity[0:2]  # XY components of velocity
+                # Use velocity direction in XY plane as desired yaw (smoother, more stable)
+                if np.linalg.norm(velocity_xy) > 0.1:  # Avoid division by zero
+                    desired_yaw = np.arctan2(velocity_xy[1], velocity_xy[0])
+                    # Get current yaw from FPV camera horizontal projection
+                    if np.linalg.norm(fpv_forward_xy) > 0.1:
+                        current_fpv_yaw = np.arctan2(fpv_forward_xy[1], fpv_forward_xy[0])
+                        # Normalize yaw difference to [-pi, pi]
+                        yaw_diff = np.arctan2(np.sin(desired_yaw - current_fpv_yaw), np.cos(desired_yaw - current_fpv_yaw))
+                        yaw_error = abs(yaw_diff)
+                        # Reward for good yaw alignment, with penalty for large errors
+                        # Perfect alignment gives reward, large misalignment gives penalty
+                        yaw_reward = 0.1 * (np.cos(yaw_error) - 0.3)  # Range: [-0.13, +0.07]
+            
+            # Waypoint Passage Reward: Encourage passing through waypoints
+            waypoint_passage_reward = 0.0
+            if hasattr(self, "WAYPOINT_R") and dist < self.WAYPOINT_R * 1.5:
+                # Bonus reward when close to waypoint and moving toward it
+                if speed > 0.1:
+                    # Reward increases as we get closer and move faster toward waypoint
+                    proximity_factor = max(0, 1.0 - dist / (self.WAYPOINT_R * 1.5))
+                    velocity_toward_target = (
+                        np.dot(velocity_normalized, to_target_normalized) if speed > 0.1 else 0
+                    )
+                    waypoint_passage_reward = 0.1 * proximity_factor * max(0, velocity_toward_target)
+
+            # Heading-Velocity Alignment Reward: Encourage FPV camera to face direction of motion
+            # Uses FPV camera forward vector (30° upward tilt) instead of body forward axis
+            heading_vel_reward = 0.0
+            if speed > 0.1:
+                # Cosine between FPV camera forward vector and velocity direction
+                cos_heading_vel = np.dot(fpv_forward_world, velocity_normalized)
+                # Small reward for aligning FPV camera with direction of motion
+                # This complements the CBF which also uses FPV camera direction
+                heading_vel_reward = 0.03 * cos_heading_vel
+
+            total_reward = (
+                prog_reward
+                + command_reward
+                + align_cbf_reward
+                + yaw_reward
+                + waypoint_passage_reward
+                + heading_vel_reward
+            )
             self.prog_reward = prog_reward
             self.command_reward = command_reward
             return total_reward

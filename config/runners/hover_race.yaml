@@ -3,7 +3,7 @@ pyrl:
   exp_name: "hover_race" # Experiment name
   runner: "parallel" # Runs n_envs envs in parallel
   n_envs: 64 # Number of environments to run in parallel
-  t_max: 30000000 # Stop running after this many timesteps
+  t_max: 120000000 # Stop running after this many timesteps
   use_cuda: True # Use gpu by default unless it isn't available
 
 # --- Logging options ---

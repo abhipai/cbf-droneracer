@@ -450,6 +450,7 @@ def _eval_sim_loop(
     # initialize the evaluation
     eval_loop = config_dict["logging"].get("eval_loop", 1)
     comment = None
+    gate_planner = None  # default when no dynamic gates/track are used
     if track_name is not None:
         waypoints_track, comment, track_raw_data, gate_planner = _read_track(
             current_dir=current_dir, env=env, track_name=track_name, verbose=config_dict["rl_hyperparams"]["verbose"]
